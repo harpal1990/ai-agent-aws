@@ -3,6 +3,7 @@ import boto3
 import json
 import re
 from rich import print
+from rich.table import Table
 
 # -----------------------------
 # CONFIG
@@ -13,37 +14,46 @@ MODEL = "qwen2.5-coder"
 ec2 = boto3.client('ec2')
 
 SYSTEM_PROMPT = """
-You are a DevOps AI agent.
+You are a DevOps AI agent for AWS EC2 management.
 
-STRICT RULES:
-- ONLY return valid JSON
-- DO NOT use markdown
-- DO NOT use ```json
-- NO explanation text
-- Fix spelling mistakes automatically
+=====================
+RULES (VERY IMPORTANT)
+=====================
+- ALWAYS return ONLY valid JSON
+- NO explanation
+- NO markdown
+- NO ``` or ```json
+- Output must be directly parsable
 
-Supported actions:
+=====================
+SUPPORTED ACTIONS
+=====================
 1. list_ec2
 2. start_ec2
 3. stop_ec2
 
-User can refer instance by:
-- instance_id
-- name
+=====================
+INPUT HANDLING
+=====================
+- Fix spelling mistakes automatically
+- Understand natural language
+- Extract instance name or ID correctly
 
-Examples:
-
-User: show ec2
-Response:
+=====================
+OUTPUT FORMAT
+=====================
+For list:
 {"action": "list_ec2"}
 
-User: start test server
-Response:
+For start:
+{"action": "start_ec2", "instance_id": "i-123"}
+OR
 {"action": "start_ec2", "name": "test"}
 
-User: stop instance i-123
-Response:
+For stop:
 {"action": "stop_ec2", "instance_id": "i-123"}
+OR
+{"action": "stop_ec2", "name": "test"}
 """
 
 # -----------------------------
@@ -58,16 +68,12 @@ def ask_ai(prompt):
         })
 
         data = response.json()
-
         print("[blue]RAW AI RESPONSE:[/blue]", data)
 
-        if "response" not in data:
-            return f"ERROR: Invalid API response -> {data}"
-
-        return data["response"]
+        return data.get("response", "")
 
     except Exception as e:
-        return f"ERROR: Request failed -> {str(e)}"
+        return f"ERROR: {str(e)}"
 
 
 # -----------------------------
@@ -84,19 +90,45 @@ def extract_json(text):
 
 
 # -----------------------------
-# HELPER: FIND INSTANCE BY NAME
+# FIND INSTANCE BY NAME
 # -----------------------------
 def get_instance_id_by_name(name):
     instances = ec2.describe_instances()
 
-    for reservation in instances["Reservations"]:
-        for instance in reservation["Instances"]:
-            if "Tags" in instance:
-                for tag in instance["Tags"]:
+    for r in instances["Reservations"]:
+        for i in r["Instances"]:
+            if "Tags" in i:
+                for tag in i["Tags"]:
                     if tag["Key"] == "Name" and tag["Value"].lower() == name.lower():
-                        return instance["InstanceId"]
+                        return i["InstanceId"]
 
     return None
+
+
+# -----------------------------
+# PRINT TABLE
+# -----------------------------
+def print_ec2_table(instances):
+    table = Table(title="EC2 Instances")
+
+    table.add_column("Instance ID", style="cyan")
+    table.add_column("Name", style="green")
+    table.add_column("State", style="yellow")
+    table.add_column("Type")
+    table.add_column("Private IP")
+    table.add_column("Public IP")
+
+    for inst in instances:
+        table.add_row(
+            inst.get("InstanceId", ""),
+            inst.get("Name", ""),
+            inst.get("State", ""),
+            inst.get("InstanceType", ""),
+            str(inst.get("PrivateIP", "")),
+            str(inst.get("PublicIP", ""))
+        )
+
+    print(table)
 
 
 # -----------------------------
@@ -110,26 +142,24 @@ def execute_action(action_json):
         # LIST EC2
         # -----------------
         if action == "list_ec2":
-            instances = ec2.describe_instances()
-
+            data = ec2.describe_instances()
             result = []
 
-            for reservation in instances["Reservations"]:
-                for instance in reservation["Instances"]:
-
+            for r in data["Reservations"]:
+                for i in r["Instances"]:
                     name = "N/A"
-                    if "Tags" in instance:
-                        for tag in instance["Tags"]:
+                    if "Tags" in i:
+                        for tag in i["Tags"]:
                             if tag["Key"] == "Name":
                                 name = tag["Value"]
 
                     result.append({
-                        "InstanceId": instance["InstanceId"],
+                        "InstanceId": i["InstanceId"],
                         "Name": name,
-                        "State": instance["State"]["Name"],
-                        "InstanceType": instance["InstanceType"],
-                        "PrivateIP": instance.get("PrivateIpAddress"),
-                        "PublicIP": instance.get("PublicIpAddress")
+                        "State": i["State"]["Name"],
+                        "InstanceType": i["InstanceType"],
+                        "PrivateIP": i.get("PrivateIpAddress"),
+                        "PublicIP": i.get("PublicIpAddress")
                     })
 
             return result
@@ -172,7 +202,7 @@ def execute_action(action_json):
 
 
 # -----------------------------
-# MAIN LOOP
+# MAIN
 # -----------------------------
 def main():
     print("[bold green]🚀 AWS DevOps AI Agent Started[/bold green]\n")
@@ -184,11 +214,6 @@ def main():
             break
 
         ai_output = ask_ai(user_input)
-
-        # Handle API error
-        if ai_output.startswith("ERROR"):
-            print(f"[red]{ai_output}[/red]")
-            continue
 
         clean_json = extract_json(ai_output)
 
@@ -211,7 +236,11 @@ def main():
 
         if confirm.lower() == "yes":
             result = execute_action(action_json)
-            print(f"\n[green]{result}[/green]")
+
+            if isinstance(result, list):
+                print_ec2_table(result)
+            else:
+                print(f"\n[green]{result}[/green]")
         else:
             print("[yellow]❌ Cancelled[/yellow]")
 
