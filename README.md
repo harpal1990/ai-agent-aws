@@ -88,7 +88,10 @@ aws-ai-agent/
 ollama run qwen2.5-coder
 🔹 Run DevOps Agent
 
-python3 aws_agent.py
+python3 aws_ec2_manage.py
+
+list_ec2 or start instance_id / name or stop instance_id /name
+
 Example Commands:
 >> show ec2 instances
 >> start test server
