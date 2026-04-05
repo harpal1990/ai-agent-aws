@@ -86,9 +86,12 @@ aws-ai-agent/
 🔹 Start Ollama (if not running)
 
 ollama run qwen2.5-coder
-🔹 Run DevOps Agent
 
-python3 aws_ec2_manage.py
+🔹 Run DevOps Agent
+# pip install boto3 requests rich
+# source myenv/bin/activate
+# python3 -m venv myenv
+# python3 aws_ec2_manage.py
 
 list_ec2 or start instance_id / name or stop instance_id /name
 
